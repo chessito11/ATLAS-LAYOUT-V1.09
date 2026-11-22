@@ -611,7 +611,7 @@ This will replace the current local project slots on this device.`)) return;
     clearTimeout(saveTimer);
     for(const key of PROJECT_SLOTS){
       const saved=backup.projects[key]??null;
-      if(saved) await idbSetAt(key,saved); else await idbDeleteAt(key);
+      if(saved) await idbPutAt(key,saved); else await idbDeleteAt(key);
     }
     let nextKey=(backup.activeProjectKey&&PROJECT_SLOTS.includes(backup.activeProjectKey))?backup.activeProjectKey:null;
     if(nextKey){
