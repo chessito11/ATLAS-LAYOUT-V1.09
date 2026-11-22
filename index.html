@@ -143,9 +143,10 @@ main{display:block;padding:8px;height:calc(100vh - 50px);height:calc(100dvh - 50
 <div class="row"><button id="openProject" class="secondary">Open selected project</button><button id="clear" class="secondary">Clear drawing</button></div>
 <div class="row"><button id="saveNow" class="secondary">Save project now</button><button id="newProject" class="secondary">New project</button></div>
 <div class="row"><button id="deleteProject" class="secondary wide">Delete selected project</button></div>
-<div class="row"><button id="downloadBackup" class="secondary wide">Download 9-project backup</button></div>
+<div class="row"><button id="downloadBackup" class="secondary">Download 9-project backup</button><button id="importBackup" class="secondary">Import backup</button></div>
+<input id="backupFile" type="file" accept=".json,.atlasbackup.json,application/json" style="display:none">
 <div class="note">ATLAS keeps up to nine separate local projects on this device. Auto-save and “Save project now” apply only to the active project slot. Delete Selected Project permanently empties that slot after confirmation.</div>
-<div class="note">Download Backup saves all 9 slots into one <b>.atlasbackup.json</b> file for safekeeping.</div>
+<div class="note">Download Backup saves all 9 slots into one <b>.atlasbackup.json</b> file for safekeeping. Import Backup restores a previously downloaded backup onto this device.</div>
 <div id="status" class="status" role="status"></div>
 
     <hr style="border:0;border-top:1px solid #344761;margin:18px 0 12px">
@@ -594,6 +595,59 @@ async function downloadAllProjectsBackup(){
   }catch(err){status("Backup download failed: "+err.message)}
 }
 $("downloadBackup").addEventListener("click",downloadAllProjectsBackup);
+async function importProjectsBackupFromFile(file){
+  try{
+    if(!file) return;
+    const raw=await file.text();
+    let backup;
+    try{backup=JSON.parse(raw)}catch(err){throw new Error("The selected file is not valid JSON.")}
+    if(!backup||backup.format!=="ATLAS-TAPE-LAYOUT-BACKUP"||!backup.projects) throw new Error("This file is not a valid ATLAS backup.");
+    const incomingKeys=Object.keys(backup.projects||{}).filter(k=>PROJECT_SLOTS.includes(k));
+    if(!incomingKeys.length) throw new Error("The backup does not contain any recognized ATLAS project slots.");
+    const occupied=incomingKeys.filter(k=>backup.projects[k]).length;
+    if(!confirm(`Import backup with ${occupied} saved project${occupied===1?"":"s"}?
+
+This will replace the current local project slots on this device.`)) return;
+    clearTimeout(saveTimer);
+    for(const key of PROJECT_SLOTS){
+      const saved=backup.projects[key]??null;
+      if(saved) await idbSetAt(key,saved); else await idbDeleteAt(key);
+    }
+    let nextKey=(backup.activeProjectKey&&PROJECT_SLOTS.includes(backup.activeProjectKey))?backup.activeProjectKey:null;
+    if(nextKey){
+      const maybe=await idbGetAt(nextKey);
+      if(!maybe) nextKey=null;
+    }
+    if(!nextKey){
+      for(const key of PROJECT_SLOTS){ const maybe=await idbGetAt(key); if(maybe){ nextKey=key; break; } }
+    }
+    if(nextKey){
+      activeSlotDeletedEmpty=false;
+      await setActiveProjectKey(nextKey);
+      const saved=await idbGetAt(nextKey);
+      if(saved) await restoreProject(saved);
+      await refreshProjectSelect();
+      $("projectSelect").value=nextKey;
+      status(`Backup imported. Opened Project ${slotNumber(nextKey)}.`);
+    }else{
+      await setActiveProjectKey(PROJECT_SLOTS[0]);
+      activeSlotDeletedEmpty=true;
+      activeProjectName="";
+      $("measuredAB").value="";
+      loadBlank(false,false);
+      await refreshProjectSelect();
+      $("projectSelect").value=PROJECT_SLOTS[0];
+      $("saveState").textContent=`Project ${slotNumber(PROJECT_SLOTS[0])} is empty`;
+      status("Backup imported. All nine project slots are empty in that backup.");
+    }
+  }catch(err){
+    status("Backup import failed: "+err.message);
+  }finally{
+    if($("backupFile")) $("backupFile").value="";
+  }
+}
+$("importBackup").addEventListener("click",()=>$("backupFile").click());
+$("backupFile").addEventListener("change",e=>{const file=e.target.files&&e.target.files[0];if(file)importProjectsBackupFromFile(file)});
 async function deleteSelectedProject(){
   const key=$("projectSelect").value;
   if(!PROJECT_SLOTS.includes(key))return;
